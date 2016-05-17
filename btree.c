@@ -1,5 +1,7 @@
+#include <stdlib.h>
+#include <stdio.h>
 #include "btree.h"
-#include "rubix_file_system.h"
+//#include "rubix_file_system.h"
 ////////////////////////////////////////// ROTATIONS for rebalancing the tree after removals.
 ///
 /* Example
@@ -57,12 +59,13 @@ btree_node_t *create_node(int key, uint64_t pba)
 {
    int i;
    btree_node_t *node;
-   node = (btree_node_t *)kmalloc(sizeof(btree_node_t),GFP_KERNEL);
+   node = (btree_node_t *)malloc(sizeof(btree_node_t));
    node->key[0] = key; // THis is the first one.
    node->pba[0]=  pba;
-   node->free=1;  // first in the node as its just created.
-   for(i=0;i<DEGREE;i++)
+   node->idx=1;  // first in the node as its just created.
+   for(i=0;i<=DEGREE;i++)
    node->child[i] = NULL;
+   node->leaf = true;// All created nodes are leafs.
 
    return node;
 }
@@ -73,12 +76,12 @@ void print_btree(btree_node_t *root)
   if(root == NULL) return;
   else
   {
-     for(i=0;i<=root->free+1;i++)
+     for(i=0;i<root->idx;i++)
      {
-        printk("%llu %llu ",root->key[i],root->pba[i]);
+        printf("%lu %lu ",root->key[i],root->pba[i]);
      }
-     printk("\n");
-     for(i=0;i<=root->free +1;i++)
+     printf("\n");
+     for(i=0;i<root->idx +1 ;i++)
      {
         if(root->child[i])
         print_btree(root->child[i]);
@@ -88,10 +91,144 @@ void print_btree(btree_node_t *root)
 
 int middle_element(btree_node_t *root, int *idx, uint64_t *pba)
 {
-   *idx = (root->free)/2;
+   *idx = (root->idx)/2;
    *pba = root->pba[*idx];
    return root->key[*idx];
 }
+
+/*
+these modifications to be done to the insertion algorithm 
+
+1. start from the root. 
+2. add to the root and then split if we need to. 
+3. then proceed further down.*/ 
+
+void split_child(btree_node_t *node, btree_node_t *parent, int idx)
+{
+   int i,mid;
+   btree_node_t *right;
+   
+   // Create first , we modify later.
+   right = create_node(0,0);
+   mid = DEGREE/2;
+   // COpy up the mid value.
+
+   // In the parent, move things from idx+1 one spot right to accomodate.
+   i = DEGREE;
+   while(i >= idx && idx)
+   {
+      parent->key[i+1] = parent->key[i];
+      parent->child[i+1] = parent->child[i];
+      parent->pba[i+1] = parent->pba[i];
+      i--;
+   }
+
+   parent->key[idx] = node->key[mid];
+   parent->pba[idx] = node->pba[mid];
+   // Make the parent point to the left and right.
+   parent->child[idx] = node;
+   parent->child[idx+1] = right;
+   // Parent is no more the leaf. 
+   parent->leaf = false;
+  
+   mid++;
+   i = 0;
+   while(i + mid < node->idx) {
+       right->key[i] = node->key[mid+i];
+       right->pba[i] = node->pba[mid+i];
+       right->child[i] = node->child[mid+i];
+       i++;
+   }
+   right->idx = node->idx - mid;
+   // Since we increased mid by 1 .. just counter it back.
+   node->idx  = mid - 1;
+   if (idx)
+   parent->idx++;
+printf("%d %d %d\n ",node->idx, parent->idx, right->idx);
+  
+}
+
+void split_node(btree_node_t *parent, btree_node_t *node, int idx)
+{
+   // Split the node into 2 nodes , insert into one
+   // based on the key value.
+
+   split_child(node, parent, idx);
+}
+
+void insert_into_nosplit(btree_node_t *node, uint64_t key, uint64_t pba)
+{
+   int i;
+   btree_node_t *t;
+   // Start from the last index.
+   i = node->idx - 1;
+
+   if (node->leaf) { // IF its the leaf then just copy the keys and values.
+printf("is the leaf ..\n");
+
+       while( i >=0 && node->key[i] > key) {
+          node->key[i+1] = node->key[i];
+          node->pba[i+1] = node->pba[i];
+          i--;
+       }
+       node->key[i+1] = key;
+       node->pba[i+1] = pba;
+       // Total count is one more.
+       node->idx = node->idx+1;
+print_btree(node);
+   }
+   else {
+       // if its not then it has child.
+       while(i >=0 && node->key[i] > key) {
+          i--;
+       }
+       // i+1 is the child now.
+       t = node->child[i+1];
+       if (t->idx == DEGREE) {
+           split_node(node,t, i+1);
+
+       if(node->key[i+1] < key) i++;
+       t = node->child[i+1]; // reload the t.
+       }
+   
+       // Add either into the split first node or the whole child.
+       insert_into_nosplit(t, key, pba);
+   }
+}
+
+btree_node_t *insert_into_tree(btree_node_t *node, uint64_t key, uint64_t pba)
+{
+   btree_node_t *root;
+   // There is nothing here add to the tree and return. 
+   if(node == NULL) {
+        node = create_node(key, pba);
+	return node;
+   }
+   else {
+        if (node->idx == DEGREE) { // We need a split.  
+            // Only if node is the root , we need to create a new root, else 
+            // we would not need any new nodes again.
+            root = create_node(0,0); 
+
+            // Just created a new node so make it the start.
+            split_node(root, node, 0);
+print_btree(root); 
+            if(root->key[0] < key)
+            node = root->child[1]; // reload the t.
+            else 
+            node = root->child[0]; //
+       }
+       else
+       root = node;
+ 
+       insert_into_nosplit(node, key, pba);
+   }
+   // Updated root.
+   return root;
+}
+
+
+#if 0
 
 btree_node_t *insert_into_tree(btree_node_t *parent, btree_node_t *node, uint64_t *key, uint64_t pba)
 {
@@ -120,7 +257,7 @@ btree_node_t *insert_into_tree(btree_node_t *parent, btree_node_t *node, uint64_
        // First just add them and then decide on split.
        j = node->free - 1;  // the max index to start with.
 
-printk("Adding ..:%llu %llu\n",*key, node->key[j+2]);
+printf("Adding ..:%llu %llu\n",*key, node->key[j+2]);
        while (j >= 0 && node->key[j] > *key)  // found the location.
        {
            node->key[j+1] = node->key[j];
@@ -220,22 +357,12 @@ printk("Adding ..:%llu %llu\n",*key, node->key[j+2]);
     //do it similar to rbtree. First add into the right node and then decide wether to split the node or no.
     return node;
 }
+#endif 
 
 btree_node_t *insertion(btree_node_t *root, uint64_t key, uint64_t pba)
 {
    btree_node_t *node;
-
-   if(root == NULL)
-   {
-       // If there are no nodes yet first create one with the key
-       node = create_node(key,pba);
-
-       return node;
-   }
-   else
-   {
-       root = insert_into_tree(NULL, root, &key, pba);
-   }
+   root = insert_into_tree(root,key, pba);
    return root;
 }
  
@@ -245,7 +372,7 @@ btree_node_t *search(btree_node_t *root, uint64_t key, uint64_t *idx, btree_node
     int i;
     btree_node_t *node=NULL,*child;
     // This is the number of free elements.
-    i = root->free - 1;
+    i = root->idx - 1;
 
     while (i >= 0 && root->key[i] >= key)  // found the location.
     {
@@ -281,17 +408,19 @@ btree_node_t *search(btree_node_t *root, uint64_t key, uint64_t *idx, btree_node
 
 btree_node_t *search_node(btree_node_t *root, uint64_t key, uint64_t *idx)
 {
-   int64_t pidx; // the idx of the key in the node.
+   uint64_t pidx; // the idx of the key in the node.
    btree_node_t *node=NULL,*parent=NULL;
     
    if(root ==  NULL) return NULL; 
    
    node = search(root, key, idx, &parent ,&pidx);
    //if(node)
-    //printk("Seach :%llu :%llu\n ",node->key[idx],*idx);
+    //printf("Seach :%llu :%llu\n ",node->key[idx],*idx);
    return node;
 }
-/*
+
+#if 0
+
 btree_node_t * rebalance_tree(btree_node_t* parent, btree_node_t *root)
 {
    if(node == NULL) return;
@@ -309,11 +438,11 @@ btree_node_t * rebalance_tree(btree_node_t* parent, btree_node_t *root)
 
    }     
 }
-*/
+
 // This is called only to clear the node when the free count goes to zero.
 void clear_node(btree_node_t *parent, btree_node_t *node, int idx)
 {
-    kfree(node);
+    free(node);
     parent->child[idx] = NULL;
 }
 
@@ -404,7 +533,7 @@ btree_node_t *remove_node(btree_node_t *root, uint64_t key)
    }
    else
    {
-         printk("Couldnt find ..\n");
+         printf("Couldnt find ..\n");
    }
    return root;
 }
@@ -440,7 +569,7 @@ btree_node_t *search_write_modification(btree_node_t *root, int key, uint64_t pb
     int i;
     btree_node_t *node=NULL,*child,*new_node;
     // This is the number of free elements.
-    i = root->free - 1;
+    i = root->idx - 1;
 
     while (i >= 0 && root->key[i] >= key)  // found the location.
     {
@@ -527,7 +656,7 @@ int level_order(btree_node_t *node, int d)
 
     if(d == 0)
     {
-        printk("%llu \n",node->key[0]);
+        printf("%llu \n",node->key[0]);
         //commit_latest_tree(node);
     }
  
@@ -540,10 +669,10 @@ int level_order(btree_node_t *node, int d)
 
 void write_level_order_disk(btree_node_t *root)
 {
-    int i;
+   int i;
    int depth = calculate_depth(root);
 
-   printk("depth:%d\n",depth);
+   printf("depth:%d\n",depth);
 
    for(i=0;i<depth;i++)
    {
@@ -552,33 +681,37 @@ void write_level_order_disk(btree_node_t *root)
    
 }
 
-/*
-int main(int argc, char argv[])
+#endif 
+
+int main(int argc, char *argv[])
 {
     btree_node_t *root=NULL,*root_new=NULL;
-    root = insertion(root, 2);
-    root = insertion(root, 7);
-    root = insertion(root, 4);
-    root = insertion(root, 8);
-    root = insertion(root, 6);
-    root = insertion(root, 9);
-    root = insertion(root, 1);
-    root = insertion(root, 5);
-    root = insertion(root, 11);
+    root = insertion(root, 2, 4);
+    root = insertion(root, 7,14);
+    root = insertion(root, 4 ,24 );
+    root = insertion(root, 8, 34);
+    print_btree(root);
+    root = insertion(root, 6,44 );
+    root = insertion(root, 9,45);
+print_btree(root);
+    root = insertion(root, 1,54);
+    root = insertion(root, 5,23);
+    root = insertion(root, 11, 12);
  
-    root = insertion(root, 12);
+    root = insertion(root, 12, 43);
+    //root = remove_node(root, 9);
     print_btree(root);
-    root = remove_node(root, 9);
+    //root = remove_node(root, 1);
     print_btree(root);
-    root = remove_node(root, 1);
+    //remove_node(root, 7);
     print_btree(root);
-    remove_node(root, 7);
-    print_btree(root);
-    remove_node(root, 12);
+    //remove_node(root, 12);
     print_btree(root);
  
-//    root_new = search_write_modification(root, 8);
-  //  print_btree(root_new);
+    // search for the entry and then modify the pba to new value.
+   // root_new = search_write_modification(root, 8, 89 );
+    print_btree(root_new);
  
     return 0;
-}*/
+}
+

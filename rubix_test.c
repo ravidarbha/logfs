@@ -16,7 +16,7 @@ void remove_hash(unsigned int ino)
 
 void dump_hash(void)
 {
-  int i;
+   int i;
    for(i=0;i<20;i++)
    {
       if(global_hash[i])
