@@ -55,38 +55,42 @@
 }*/
 ///////////////////////////////////////////////////////////////////////////
 
-btree_node_t *create_node(int key, uint64_t pba)
+btree_node_t *create_node(int idx)
 {
-   int i;
-   btree_node_t *node;
-   node = (btree_node_t *)malloc(sizeof(btree_node_t));
-   node->key[0] = key; // THis is the first one.
-   node->pba[0]=  pba;
-   node->idx=1;  // first in the node as its just created.
-   for(i=0;i<=DEGREE;i++)
-   node->child[i] = NULL;
-   node->leaf = true;// All created nodes are leafs.
+    int i;
+    btree_node_t *node;
 
-   return node;
+    node = (btree_node_t *)malloc(sizeof(btree_node_t));
+    node->idx = idx;
+    for( i = 0; i <= DEGREE; i++) {
+        node->child[i] = NULL;
+    }
+    node->leaf = true;
+
+    return node;
 }
 
 void print_btree(btree_node_t *root)
 {
-  int i;
-  if(root == NULL) return;
-  else
-  {
-     for(i=0;i<root->idx;i++)
-     {
-        printf("%lu %lu ",root->key[i],root->pba[i]);
-     }
-     printf("\n");
-     for(i=0;i<root->idx +1 ;i++)
-     {
-        if(root->child[i])
-        print_btree(root->child[i]);
-     }
-  }
+    int i;
+  
+    if (root == NULL) {
+        return;
+    }
+    else {
+
+         for(i=0;i<root->idx;i++)
+         {
+             printf("%lu %lu ",root->key[i],root->pba[i]);
+         }
+         printf("\n");
+     
+         for(i=0;i<root->idx +1 ;i++)
+         {
+             if(root->child[i])
+             print_btree(root->child[i]);
+         }
+    }
 }
 
 int middle_element(btree_node_t *root, int *idx, uint64_t *pba)
@@ -103,68 +107,66 @@ these modifications to be done to the insertion algorithm
 2. add to the root and then split if we need to. 
 3. then proceed further down.*/ 
 
-void split_child(btree_node_t *node, btree_node_t *parent, int idx)
+void split_node(btree_node_t *parent, btree_node_t *node)
 {
-   int i,mid;
-   btree_node_t *right;
+    int i,mid,j, pba_mid, key_mid;
+    btree_node_t *right;
    
-   // Create first , we modify later.
-   right = create_node(0,0);
-   mid = DEGREE/2;
-   // COpy up the mid value.
-
-   // In the parent, move things from idx+1 one spot right to accomodate.
-   i = DEGREE;
-   while(i >= idx && idx)
-   {
-      parent->key[i+1] = parent->key[i];
-      parent->child[i+1] = parent->child[i];
-      parent->pba[i+1] = parent->pba[i];
-      i--;
-   }
-
-   parent->key[idx] = node->key[mid];
-   parent->pba[idx] = node->pba[mid];
-   // Make the parent point to the left and right.
-   parent->child[idx] = node;
-   parent->child[idx+1] = right;
-   // Parent is no more the leaf. 
-   parent->leaf = false;
+    mid = DEGREE/2;
+    key_mid = node->key[mid];
+    pba_mid = node->pba[mid];
   
-   mid++;
-   i = 0;
-   while(i + mid < node->idx) {
-       right->key[i] = node->key[mid+i];
-       right->pba[i] = node->pba[mid+i];
-       right->child[i] = node->child[mid+i];
-       i++;
-   }
-   right->idx = node->idx - mid;
-   // Since we increased mid by 1 .. just counter it back.
-   node->idx  = mid - 1;
-   if (idx)
-   parent->idx++;
-printf("%d %d %d\n ",node->idx, parent->idx, right->idx);
-  
-}
+    // Until we figure out another way to do this, store them on local var.
+    right = create_node(0);
 
-void split_node(btree_node_t *parent, btree_node_t *node, int idx)
-{
-   // Split the node into 2 nodes , insert into one
-   // based on the key value.
+    // Copy till the mid(excluding into the left)
+    for(i=mid+1;i < DEGREE;i++)
+    {
+        right->key[i - mid - 1] = node->key[i];
+        node->key[i] = 0;
+        right->pba[i- mid - 1] = node->pba[i];
+        node->pba[i] = 0;
+        right->child[i - mid - 1] = node->child[i];
+        right->idx++;
+    }
+    // last link.
+    right->child[i - mid - 1] = node->child[i];
 
-   split_child(node, parent, idx);
+    // At this point we have 2 nodes, node(still the whole thing)
+    //and right. 
+
+    j = parent->idx - 1;
+ 
+    // Find the parent position for the mid
+    while (j >= 0 && parent->key[j] > key_mid)  // found the location.
+    {
+        // Copy off all the pointers to the next
+        parent->child[j+2] = parent->child[j+1]; // Just to make sure we copy all. 
+        parent->child[j+1] = parent->child[j]; 
+        parent->key[j+1] = parent->key[j];
+        parent->pba[j+1] = parent->pba[j];
+        j--;
+    }
+ 
+    parent->child[j+1] = node;
+    parent->child[j+2] = right;
+    parent->key[j+1] = key_mid;
+    parent->pba[j+1] = pba_mid;
+    parent->idx = parent->idx + 1;  
+    parent->leaf = false;
+
+    // LAst step update the node and right with correct idx and fill and fill in zeros.
+    node->idx = (node->idx - 1) - right->idx; 
 }
 
 void insert_into_nosplit(btree_node_t *node, uint64_t key, uint64_t pba)
 {
-   int i;
-   btree_node_t *t;
-   // Start from the last index.
-   i = node->idx - 1;
+    int i;
+    btree_node_t *t;
+    // Start from the last index.
+    i = node->idx - 1;
 
-   if (node->leaf) { // IF its the leaf then just copy the keys and values.
-printf("is the leaf ..\n");
+    if (node->leaf) { // IF its the leaf then just copy the keys and values.
 
        while( i >=0 && node->key[i] > key) {
           node->key[i+1] = node->key[i];
@@ -174,8 +176,7 @@ printf("is the leaf ..\n");
        node->key[i+1] = key;
        node->pba[i+1] = pba;
        // Total count is one more.
-       node->idx = node->idx+1;
-print_btree(node);
+       node->idx = node->idx + 1;
    }
    else {
        // if its not then it has child.
@@ -185,45 +186,49 @@ print_btree(node);
        // i+1 is the child now.
        t = node->child[i+1];
        if (t->idx == DEGREE) {
-           split_node(node,t, i+1);
+           split_node(node,t);
 
-       if(node->key[i+1] < key) i++;
-       t = node->child[i+1]; // reload the t.
+           if(node->key[i+1] < key) i++;
+           t = node->child[i+1]; // reload the t.
        }
-   
+
        // Add either into the split first node or the whole child.
        insert_into_nosplit(t, key, pba);
    }
 }
 
-btree_node_t *insert_into_tree(btree_node_t *node, uint64_t key, uint64_t pba)
+btree_node_t *insert_into_tree(btree_node_t *root, uint64_t key, uint64_t pba)
 {
-   btree_node_t *root;
+   btree_node_t *new_root = NULL;
    // There is nothing here add to the tree and return. 
-   if(node == NULL) {
-        node = create_node(key, pba);
-	return node;
+   if(root == NULL) {
+        root = create_node(1);
+        root->key[0] = key;
+        root->pba[0] = pba;
+        print_btree(root);
+	return root;
    }
-   else {
-        if (node->idx == DEGREE) { // We need a split.  
+   else { // If the current root has to split make a new root first.
+        if (root->idx == DEGREE) { // We need a split.  
             // Only if node is the root , we need to create a new root, else 
             // we would not need any new nodes again.
-            root = create_node(0,0); 
+            new_root = create_node(0); 
 
             // Just created a new node so make it the start.
-            split_node(root, node, 0);
-print_btree(root); 
-            if(root->key[0] < key)
-            node = root->child[1]; // reload the t.
-            else 
-            node = root->child[0]; //
-       }
-       else
-       root = node;
- 
-       insert_into_nosplit(node, key, pba);
+            split_node(new_root, root);
+            if(new_root->key[0] < key)
+                root = new_root->child[1]; // reload the t.
+            else
+                root = new_root->child[0]; //
+        }
    }
-   // Updated root.
+ 
+   // We are inserting into root.
+   insert_into_nosplit(root, key, pba);
+   if (new_root) {
+      // If new_root exists then return. It will be the new root.
+      return new_root;
+   }
    return root;
 }
 
@@ -362,7 +367,9 @@ printf("Adding ..:%llu %llu\n",*key, node->key[j+2]);
 btree_node_t *insertion(btree_node_t *root, uint64_t key, uint64_t pba)
 {
    btree_node_t *node;
-   root = insert_into_tree(root,key, pba);
+
+   root = insert_into_tree(root, key, pba);
+
    return root;
 }
  
@@ -689,11 +696,14 @@ int main(int argc, char *argv[])
     root = insertion(root, 2, 4);
     root = insertion(root, 7,14);
     root = insertion(root, 4 ,24 );
-    root = insertion(root, 8, 34);
+
     print_btree(root);
+    root = insertion(root, 8, 34);
+print_btree(root);
     root = insertion(root, 6,44 );
     root = insertion(root, 9,45);
 print_btree(root);
+ 
     root = insertion(root, 1,54);
     root = insertion(root, 5,23);
     root = insertion(root, 11, 12);

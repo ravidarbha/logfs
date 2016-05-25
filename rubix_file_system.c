@@ -97,11 +97,6 @@ rubix_inmem_t *rubix_create_inmem(struct inode *inode)
     return container_of(inode, rubix_inmem_t ,vfs_inode);
 }
 
-// Looks like we dont need this anymore. ??
-void *get_block_data_from_bh(int blk)
-{
-    return NULL;
-}
 
 // return the idx for the bh array.
 int get_buffer_head_idx(long int ino, uint64_t *mod)
